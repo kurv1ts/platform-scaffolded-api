@@ -1,0 +1,136 @@
+
+name: Build & Push Docker Image to registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to
+        type: choice
+        options: [dev, prod]
+
+permissions:
+  contents: write
+  security-events: write
+  pull-requests: write
+
+jobs:
+  build-and-push:
+    # Skip runs triggered by this workflow's own commit
+    if: "${{ !contains(github.event.head_commit.message, 'pin image tag') }}"
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.3
+
+      - name: Resolve environment from branch
+        id: env
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENV="${{ inputs.environment }}"
+          echo "env=$ENV" >> "$GITHUB_OUTPUT"
+          echo "kustomization=deployment/overlays/$ENV/kustomization.yaml" >> "$GITHUB_OUTPUT"
+
+      - name: Compute tag (merge commit SHA)
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(echo "${GITHUB_SHA}")"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          IMAGE_NAME="$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')"
+          echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ vars.DOCKER_USERNAME }}/${{ steps.vars.outputs.image_name }}:${{ steps.vars.outputs.tag }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ vars.DOCKER_USERNAME }}/${{ steps.vars.outputs.image_name }}:${{ steps.vars.outputs.tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          # Uncomment if deploying to non-local environment
+          #exit-code: '1'
+
+      # Uncomment if deploying to non-local environment
+      # - name: Upload Trivy results to GitHub Security tab
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   if: always()  
+      #   with:
+      #     sarif_file: 'trivy-results.sarif'
+
+      - name: Update env overlay image tag to SHA
+        shell: bash
+        env:
+          TAG: ${{ steps.vars.outputs.tag }}
+          IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
+          DOCKER_USERNAME: ${{ vars.DOCKER_USERNAME }}
+          KUSTOMIZATION: ${{ steps.env.outputs.kustomization }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$KUSTOMIZATION" ]; then
+            echo "Expected $KUSTOMIZATION not found. Nothing to update."
+            exit 0
+          fi
+
+          read -r -d '' YQ_EXPR <<'YQEOF' || true
+          .images = (
+            ((.images // []) | map(select(.name != strenv(IMAGE_NAME)))) +
+            [{"name": strenv(IMAGE_NAME), "newTag": strenv(TAG), "newName": (strenv(DOCKER_USERNAME) + "/" + strenv(IMAGE_NAME))}]
+          )
+          YQEOF
+          yq eval -i "$YQ_EXPR" "$KUSTOMIZATION"
+
+      - name: Create Pull Request for image update
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "pin image tag ${{ steps.vars.outputs.tag }} for ${{ steps.env.outputs.env }}"
+          branch: deploy/${{ steps.env.outputs.env }}/${{ steps.vars.outputs.tag }}
+          delete-branch: true
+          title: "🚀 Deploy ${{ steps.vars.outputs.tag }} to ${{ steps.env.outputs.env }}"
+          add-paths: |
+            ${{ steps.env.outputs.kustomization }}
+          body: |
+            ## Automated Deployment Update
+            
+            **Environment:** `${{ steps.env.outputs.env }}`
+            **Image Tag:** `${{ steps.vars.outputs.tag }}`
+            **Image:** `${{ vars.DOCKER_USERNAME }}/${{ steps.vars.outputs.image_name }}:${{ steps.vars.outputs.tag }}`
+            
+            ---
+            
+            This PR was automatically created by the build pipeline.
+            
+            ### Verification
+            - [ ] Image has been pushed to registry
+            - [ ] Trivy security scan passed
+            
+            Merge this PR to deploy the new image via ArgoCD.
+          labels: |
+            deployment
+            automated
+            ${{ steps.env.outputs.env }}

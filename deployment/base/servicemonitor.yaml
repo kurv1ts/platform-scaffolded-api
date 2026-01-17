@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: platform-scaffolded-api
+  labels:
+    app: platform-scaffolded-api
+    team: platform
+    app.kubernetes.io/name: platform-scaffolded-api
+    app.kubernetes.io/managed-by: argocd
+spec:
+  selector:
+    matchLabels:
+      app: platform-scaffolded-api
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 10s
+      scrapeTimeout: 10s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_service_name]
+          targetLabel: service
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: team
+          replacement: platform
+

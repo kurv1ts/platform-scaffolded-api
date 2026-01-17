@@ -1,0 +1,15 @@
+services:
+  app:
+    container_name: app
+    build: .
+    env_file:
+      - .env
+    ports: ["3000:3000"]
+    networks:
+      - general-network
+    restart: unless-stopped
+
+networks:
+  general-network:
+    name: general-network
+    driver: bridge

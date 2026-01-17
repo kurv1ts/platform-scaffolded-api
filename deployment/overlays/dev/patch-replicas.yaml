@@ -1,0 +1,6 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-scaffolded-api
+spec:
+  replicas: 1

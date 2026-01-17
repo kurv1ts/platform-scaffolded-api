@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-scaffolded-api-config
+data:
+  PORT: "3000"
+  NODE_ENV: "dev"
+  ENVIRONMENT: "dev"
+  SERVICE_NAMESPACE: "platform-dev"
+  METRICS_PREFIX: "platform_scaffolded_api_"
+  SERVICE_NAME: "platform-scaffolded-api"
+  # OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo.observability-dev.svc:4318"  # Uncomment when Tempo is deployed

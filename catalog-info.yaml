@@ -1,0 +1,12 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: platform-scaffolded-api
+  description: platform-scaffolded-api
+  annotations:
+    github.com/project-slug: kurv1ts/platform-scaffolded-api
+spec:
+  type: service
+  owner: group:default/platform
+  lifecycle: experimental
+
